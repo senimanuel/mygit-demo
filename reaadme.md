@@ -2,22 +2,22 @@
 
 ## Context
 
-EMS currently operates a hybrid operational model across multiple applications:
+EMS operates a mixed infrastructure model across multiple application domains:
 
 * **Flow Control**
 * **Marketing**
 * **TAPI**
 * **Hygiene**
 
-While EMS has begun adopting modern practices in certain areas, the overall infrastructure mindset remains partially aligned with a traditional “Pets” model.
+While EMS has adopted modern delivery practices in certain areas, infrastructure management across the organisation still reflects elements of the traditional “Pets” model.
 
 This page outlines:
 
-* The specific challenges EMS faces
-* The structural differences across application groups
-* The risks of remaining in the current state
-* The practical pathway to transition
-* The measurable benefits to EMS
+* EMS’s current state
+* The specific challenges unique to EMS
+* A pragmatic transition approach
+* How EMS can leverage existing assets (including test servers)
+* The measurable benefits of adopting a Cattle mindset
 
 ---
 
@@ -25,24 +25,24 @@ This page outlines:
 
 ## 1.1 Flow Control
 
-Flow Control is comparatively mature in delivery practices.
+Flow Control demonstrates a more modern delivery approach.
 
-It uses:
+It currently uses:
 
 * CI/CD pipelines
 * Jenkins
 * Bitbucket for version control
-* Automated deployment model
+* Automated deployment patterns
 
-Flow Control is largely independent from the other application domains.
+Flow Control operates relatively independently from other EMS applications and is the closest workload to being “Cattle-ready.”
 
 However:
 
-* Some services run on shared infrastructure (e.g., “Bad Job Servers”)
-* Not all services are containerised
-* Infrastructure still includes long-lived instances
+* Some services still run on long-lived instances
+* Full immutability has not yet been adopted
+* Infrastructure may still depend on instance-level configuration
 
-Flow Control is closest to a “Cattle-ready” workload but not fully there.
+Flow Control provides a strong foundation for broader transformation.
 
 ---
 
@@ -50,44 +50,46 @@ Flow Control is closest to a “Cattle-ready” workload but not fully there.
 
 These applications exhibit stronger “Pets” characteristics.
 
-Observed traits:
+Common patterns include:
 
-* SME-dependent knowledge
+* Heavy SME dependency
 * Manual server configuration
-* Vertical scaling (increase CPU/memory instead of scale-out)
 * Limited automation
-* Long-lived instances
+* Long-lived servers
+* Vertical scaling (increasing CPU/memory rather than scaling out)
 
-Operational risk is higher because:
+Operational implications:
 
-* Knowledge concentration is significant
-* Automation is limited
-* Scaling is constrained
-* Drift risk is elevated
+* High knowledge concentration
+* Greater configuration drift risk
+* Limited elasticity
+* Slower recovery during incidents
+
+These workloads represent the primary transformation challenge for EMS.
 
 ---
 
-## 1.3 “Bad Job Servers”
+## 1.3 “Bad Job Servers” — Repositioned as a Strategic Asset
 
-EMS currently operates dedicated “Bad Job Servers.”
+The “Bad Job Servers” are primarily used for:
 
-Characteristics:
+* Testing purposes
+* Internal workloads
+* Partial service execution
+* Non-production scenarios
 
-* Shared workloads
-* Mixed responsibilities
-* Partial Flow Control services
-* Internally used applications
-* Manually managed services
+They are not core production-critical infrastructure.
 
-Risks introduced by this pattern:
+This significantly lowers transition risk and creates a strategic opportunity.
 
-* Blurred ownership
-* High blast radius during failure
-* Difficult isolation of faults
-* Hard to scale specific workloads independently
-* Increased configuration drift
+Rather than viewing them as architectural debt, EMS can treat them as:
 
-The naming itself reflects a reactive pattern rather than architectural intent.
+* A containerisation test bed
+* A refactoring validation platform
+* A CI/CD expansion environment
+* A controlled innovation sandbox
+
+If formalised properly, they become an enabler of transformation rather than a liability.
 
 ---
 
@@ -95,219 +97,230 @@ The naming itself reflects a reactive pattern rather than architectural intent.
 
 ## 2.1 Cultural & Knowledge Dependency
 
-Several applications depend heavily on SMEs.
+Several applications rely heavily on SMEs for operational continuity.
 
-Risks:
+Risks include:
 
 * High bus factor
+* Undocumented server configurations
 * Resistance to disposability
-* Fear of automation replacing manual control
-* Difficulty codifying undocumented processes
+* Perceived loss of control with automation
 
-Mindset shift required:
-Infrastructure should not depend on individual expertise for survival.
+The mindset shift required is significant: infrastructure resilience must not depend on individual expertise.
 
 ---
 
 ## 2.2 Vertical Scaling Bias
 
-Current scaling strategy in Marketing, TAPI, and Hygiene largely involves:
+Marketing, TAPI, and Hygiene predominantly scale by:
 
-* Increasing processor
+* Increasing processor allocation
 * Increasing memory
-* Maintaining single-instance dependency
+* Maintaining single-instance architecture
 
-Limitations:
+Limitations of this approach:
 
 * Hardware ceiling constraints
 * Higher downtime risk
-* Cost inefficiency
 * Reduced elasticity
+* Inefficient cloud cost utilisation
 
-This model does not leverage cloud-native strengths.
+This pattern underutilises cloud-native strengths.
 
 ---
 
 ## 2.3 Application Architecture Constraints
 
-Some EMS applications were designed:
+Some EMS applications were not designed for:
 
-* Without containerisation in mind
-* With static configuration assumptions
-* With tight server coupling
+* Containerisation
+* Stateless execution
+* Dynamic configuration
+* Independent scaling
 
-Transitioning to Cattle may require:
+Transitioning to Cattle will require:
 
-* Refactoring
 * Externalising configuration
 * Removing local state dependencies
-* Redesigning service boundaries
+* Refactoring tightly coupled services
+* Redefining service boundaries
 
-This is not a lift-and-shift problem — it is an architectural evolution.
+This is architectural evolution, not simple migration.
 
 ---
 
-## 2.4 Shared Infrastructure Pattern
+## 2.4 Inconsistent Delivery Practices
 
-“Bad Job Servers” represent a shared-server model where multiple responsibilities coexist.
+Flow Control uses CI/CD and version-controlled deployments, while other applications rely more heavily on manual processes.
 
-Problems:
+This inconsistency:
 
-* Scaling one workload affects others
-* Troubleshooting becomes complex
-* Isolation is limited
-* Replacement is risky
+* Slows standardisation
+* Increases operational risk
+* Creates uneven maturity levels
+* Complicates governance enforcement
 
-This pattern conflicts with immutability and disposability.
+Standardisation is critical for organisation-wide transformation.
 
 ---
 
 # 3. EMS Transition Approach
 
-The transition should be phased and pragmatic — not disruptive.
+The transition must be phased, controlled, and pragmatic.
+
+It should prioritise learning and validation before broad enforcement.
 
 ---
 
-## Phase 1: Classification
+## Phase 1: Classification & Maturity Mapping
 
-Group applications into:
+Group EMS applications into:
 
-1. Cloud-ready (Flow Control candidate)
-2. Refactor-required (Marketing, TAPI, Hygiene)
-3. Legacy containment workloads
+1. **Cloud-ready (Flow Control candidates)**
+2. **Refactor-required (Marketing, TAPI, Hygiene)**
+3. **Legacy containment workloads**
 
-This avoids a one-size-fits-all strategy.
+This enables targeted strategy rather than blanket mandates.
 
 ---
 
-## Phase 2: Containerisation Strategy
+## Phase 2: Use “Bad Job Servers” as a Pilot Platform
+
+Formalise these test servers as a containerisation sandbox.
+
+Actions:
+
+* Identify Java-based components suitable for containerisation
+* Package services into Docker images
+* Externalise configuration
+* Introduce health checks
+* Validate stateless execution
+
+This approach:
+
+* Minimises production risk
+* Demonstrates feasibility
+* Builds internal engineering confidence
+* Reduces SME resistance
+
+---
+
+## Phase 3: Expand CI/CD Beyond Flow Control
+
+Extend the existing Jenkins + Bitbucket model to:
+
+* Marketing
+* TAPI
+* Hygiene
+
+Begin with non-production deployments.
+
+Objective:
+
+* Remove manual deployment steps
+* Codify infrastructure changes
+* Standardise delivery practices
+
+---
+
+## Phase 4: Shift from Vertical to Horizontal Scaling
 
 Where feasible:
 
-* Containerise Java-based packages
-* Externalise configuration (env vars, config services)
-* Remove local state dependency
-* Introduce health checks
+* Run multiple service instances
+* Introduce load balancing
+* Test failure scenarios
+* Validate automated recovery
 
-This allows:
-
-* Stateless deployment
-* Horizontal scaling
-* Isolation per service
-
-However, this requires code-level refactoring and reconfiguration effort.
+Even within test environments, this begins mindset transformation.
 
 ---
 
-## Phase 3: Eliminate Shared “Bad Job” Servers
+## Phase 5: Enforce Infrastructure as Code
 
-Move from:
+Gradually introduce:
 
-Shared multi-purpose servers
+* Immutable deployments
+* Drift detection
+* Reduced manual console access
+* Standardised build pipelines
 
-To:
-
-* Isolated service deployments
-* Container orchestration (e.g., Kubernetes or managed alternatives)
-* Per-service scaling
-
-This reduces blast radius and improves observability.
-
----
-
-## Phase 4: Enforce Infrastructure as Code
-
-All new infrastructure must be:
-
-* Provisioned via IaC
-* Immutable
-* Rebuildable
-* Drift-detectable
-
-Manual console changes must gradually be eliminated.
-
----
-
-## Phase 5: Cultural Shift Enablement
-
-Leadership must communicate:
-
-* Automation does not remove ownership
-* It increases resilience
-* SME knowledge must be codified
-* Documentation + pipelines replace tribal knowledge
-
-This is a mindset evolution, not a job displacement.
+Automation should become the default path.
 
 ---
 
 # 4. Benefits to EMS
-
-Transitioning to the Cattle model provides EMS with:
 
 ## Operational Benefits
 
 * Reduced MTTR
 * Lower incident severity
 * Predictable recovery
-* Reduced dependency on individual SMEs
+* Reduced SME dependency
 
 ---
 
 ## Architectural Benefits
 
-* Independent scaling of applications
-* Clear service boundaries
+* Independent scaling per application
+* Clear service isolation
 * Reduced blast radius
-* Improved isolation
+* Greater system resilience
 
 ---
 
 ## Financial Benefits
 
-* Elastic scaling
-* Avoidance of over-provisioned vertical machines
-* Better resource utilisation
+* Elastic resource utilisation
+* Reduced over-provisioning
+* Better alignment of cost to demand
 * Lower long-term operational overhead
 
 ---
 
 ## Governance & Compliance Benefits
 
-* Infrastructure traceability
+* Improved infrastructure traceability
+* Stronger audit posture
 * Reduced configuration drift
-* Improved audit posture
-* Clear change tracking
+* Standardised deployment evidence
 
 ---
 
 # 5. Risks of Not Transitioning
 
-If EMS remains in a partial “Pets” model:
+If EMS maintains the current mixed model:
 
-* Shared server fragility increases
-* SME dependency grows
-* Scaling becomes costlier
-* Incident recovery remains manual
-* Cloud value remains unrealised
+* SME dependency will deepen
+* Shared infrastructure fragility will persist
+* Vertical scaling costs will increase
+* Incident recovery will remain manual
+* Cloud value will remain partially unrealised
 
-The organisation risks stagnating in a hybrid operational model that captures cost but not capability.
+The organisation risks absorbing cloud cost without achieving cloud capability.
 
 ---
 
 # 6. Strategic Position for EMS
 
-Flow Control demonstrates that EMS already has capability in CI/CD and automation.
+EMS is not starting from zero.
 
-The next step is consistency across all application domains.
+Flow Control already demonstrates:
 
-The objective is not to eliminate legacy systems overnight — but to progressively:
+* CI/CD maturity
+* Version-controlled deployments
+* Automation capability
 
-* Isolate services
-* Containerise where feasible
-* Remove shared server dependency
-* Codify infrastructure
-* Shift scaling from vertical to horizontal
+The opportunity now is to:
 
-EMS does not need to rebuild everything; it needs to standardise the direction of travel.
+* Extend this maturity consistently
+* Leverage test environments for innovation
+* Containerise selectively and pragmatically
+* Reduce vertical scaling dependency
+* Standardise infrastructure governance
 
+EMS does not need disruptive transformation.
+
+It needs structured progression.
+
+The objective is steady, measurable movement from long-lived, manually managed infrastructure toward immutable, automated, horizontally scalable systems.
