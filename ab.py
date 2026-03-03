@@ -23,36 +23,32 @@ def cli(args):
     return result.stdout
 
 
-def prefix_exists(bucket, prefix):
-    r = subprocess.run(
-        ["aws", "s3api", "list-objects-v2", "--bucket", bucket,
-         "--prefix", prefix, "--max-items", "1"],
-        capture_output=True, text=True
-    )
-    return r.returncode == 0 and json.loads(r.stdout).get("KeyCount", 0) > 0
+def s3_ls(uri):
+    """Run aws s3 ls and return output lines. Returns [] on any error."""
+    r = subprocess.run(["aws", "s3", "ls", uri], capture_output=True, text=True)
+    return r.stdout.splitlines() if r.returncode == 0 else []
 
 
 def find_report_bucket():
     """
     Scan all buckets for one containing a Summary-Reports folder.
-    Checks at the root level and one level deep (e.g. reports/Summary-Reports/).
+    Uses aws s3 ls (same as the rest of the script). Checks root and one
+    level deep (e.g. reports/Summary-Reports/).
     Returns (bucket, base_prefix).
     """
     buckets = json.loads(cli(["s3api", "list-buckets"]))["Buckets"]
     for b in buckets:
         bucket = b["Name"]
-        r = subprocess.run(
-            ["aws", "s3api", "list-objects-v2", "--bucket", bucket,
-             "--delimiter", "/", "--max-items", "20"],
-            capture_output=True, text=True
-        )
-        if r.returncode != 0:
-            continue  # no access — skip
-        data = json.loads(r.stdout)
-        # Check root, then each top-level folder
-        candidates = [""] + [p["Prefix"] for p in data.get("CommonPrefixes", [])]
-        for prefix in candidates:
-            if prefix_exists(bucket, f"{prefix}Summary-Reports/"):
+        top_lines = s3_ls(f"s3://{bucket}/")
+        # Collect root + any top-level folders as candidate prefixes
+        top_prefixes = [""] + [
+            line.split()[-1]
+            for line in top_lines
+            if line.split() and line.split()[-1].endswith("/")
+        ]
+        for prefix in top_prefixes:
+            sub_lines = s3_ls(f"s3://{bucket}/{prefix}")
+            if any("Summary-Reports/" in line for line in sub_lines):
                 return bucket, prefix
 
     sys.exit("No bucket with a DataSync Summary-Reports structure found.")
