@@ -89,23 +89,79 @@ def get_transferred_files(bucket, summary_key):
     return all_files
 
 
+def resolve_bucket(name):
+    """
+    Given a bucket name, find the base prefix that contains Summary-Reports/.
+    Returns (bucket, base_prefix) or prints a warning and returns (None, None).
+    """
+    top_lines = s3_ls(f"s3://{name}/")
+    if not top_lines and not s3_ls(f"s3://{name}/"):
+        print(f"  [!] Cannot access s3://{name}/ — check the name and permissions.")
+        return None, None
+
+    top_prefixes = [""] + [
+        line.split()[-1]
+        for line in top_lines
+        if line.split() and line.split()[-1].endswith("/")
+    ]
+    for prefix in top_prefixes:
+        sub_lines = s3_ls(f"s3://{name}/{prefix}")
+        if any("Summary-Reports/" in line for line in sub_lines):
+            return name, prefix
+
+    print(f"  [!] No Summary-Reports/ folder found in s3://{name}/")
+    return None, None
+
+
+def prompt_buckets():
+    """
+    Interactive prompt: auto-discover a bucket, then let the user add more
+    or override with a manual name.
+    Returns a list of (bucket, base_prefix) tuples.
+    """
+    print("\nAuto-discovering DataSync report bucket...", flush=True)
+    discovered_bucket, discovered_prefix = find_report_bucket()
+    print(f"  Found: {discovered_bucket}  (prefix: '{discovered_prefix or 'root'}')")
+
+    use = input("\nUse this bucket? [Y/n]: ").strip().lower()
+    buckets = []
+    if use != "n":
+        buckets.append((discovered_bucket, discovered_prefix))
+
+    while True:
+        add = input("Add another bucket? [y/N]: ").strip().lower()
+        if add != "y":
+            break
+        name = input("  Bucket name: ").strip()
+        if not name:
+            continue
+        bucket, prefix = resolve_bucket(name)
+        if bucket:
+            print(f"  OK — prefix: '{prefix or 'root'}'")
+            buckets.append((bucket, prefix))
+
+    if not buckets:
+        sys.exit("No buckets selected. Exiting.")
+    return buckets
+
+
 def main():
     output_json = "--output" in sys.argv and sys.argv[sys.argv.index("--output") + 1] == "json"
 
-    bucket, base_prefix = find_report_bucket()
-    print(f"\nBucket : {bucket}", file=sys.stderr)
-    print(f"Prefix : {base_prefix or '(root)'}\n", file=sys.stderr)
-
-    summary_keys = find_summary_keys(bucket, base_prefix)
-    if not summary_keys:
-        sys.exit("No summary reports found.")
-    print(f"Found {len(summary_keys)} execution(s):", file=sys.stderr)
+    selected = prompt_buckets()
 
     all_files = []
-    for key in summary_keys:
-        all_files.extend(get_transferred_files(bucket, key))
+    for bucket, base_prefix in selected:
+        print(f"\nBucket : {bucket}", flush=True)
+        summary_keys = find_summary_keys(bucket, base_prefix)
+        if not summary_keys:
+            print("  No summary reports found.")
+            continue
+        print(f"  Found {len(summary_keys)} execution(s):")
+        for key in summary_keys:
+            all_files.extend(get_transferred_files(bucket, key))
 
-    print(f"\nTotal successfully transferred: {len(all_files)} file(s)\n", file=sys.stderr)
+    print(f"\nTotal successfully transferred: {len(all_files)} file(s)\n")
 
     if output_json:
         print(json.dumps(all_files, indent=2))
