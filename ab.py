@@ -14,6 +14,7 @@ Usage:
 import json
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def cli(args):
@@ -67,45 +68,75 @@ def find_summary_keys(bucket, base_prefix):
     ]
 
 
-def process_execution(bucket, summary_key, location_uris):
-    summary = json.loads(cli(["s3", "cp", f"s3://{bucket}/{summary_key}", "-"]))
-    exec_id   = summary.get("TaskExecutionId", "")
-    result    = summary.get("Result", {})
-    count     = result.get("FilesTransferred", 0)
-    skipped   = result.get("FilesSkipped", 0)
-    status    = summary.get("OverallStatus", "")
+def uri_path(uri):
+    """Extract just the path portion from a location URI.
+    e.g. 's3://my-bucket/cbluedev/data/' -> '/cbluedev/data/'
+         'ontap://svm-xxx/vol/cbluetest'  -> '/vol/cbluetest'
+    """
+    if "://" in uri:
+        after_scheme = uri.split("://", 1)[1]       # 'my-bucket/cbluedev/data/'
+        after_host   = after_scheme.split("/", 1)   # ['my-bucket', 'cbluedev/data/']
+        path = "/" + after_host[1] if len(after_host) > 1 else "/"
+        return path.rstrip("/") or "/"
+    return uri
 
-    src_id    = summary.get("SourceLocation", {}).get("LocationId", "")
-    dst_id    = summary.get("DestinationLocation", {}).get("LocationId", "")
-    src_type  = summary.get("SourceLocation", {}).get("LocationType", "")
-    dst_type  = summary.get("DestinationLocation", {}).get("LocationType", "")
-    src_uri   = location_uris.get(src_id, src_id)
-    dst_uri   = location_uris.get(dst_id, dst_id)
 
-    print(f"\n  {exec_id}  [{status}]")
-    print(f"    Source      : {src_uri}  ({src_type})")
-    print(f"    Destination : {dst_uri}  ({dst_type})")
-    print(f"    Transferred : {count} file(s)  |  Skipped: {skipped}")
-
-    if count == 0:
-        return []
-
-    # Fetch per-file list from Detailed-Reports
+def fetch_files_from_detailed(bucket, summary_key):
+    """Fetch per-file transferred list from Detailed-Reports for one execution."""
     detailed_prefix = summary_key.replace("Summary-Reports", "Detailed-Reports").rsplit("/", 1)[0]
     ls_output = cli(["s3", "ls", f"s3://{bucket}/{detailed_prefix}/"])
 
+    # Collect all report file keys first, then fetch them in parallel
+    report_keys = [
+        f"{detailed_prefix}/{parts[3].strip()}"
+        for line in ls_output.splitlines()
+        if len((parts := line.split(maxsplit=3))) == 4
+        and "files-transferred" in parts[3]
+        and parts[3].endswith(".json")
+    ]
+
+    def read_report(key):
+        report = json.loads(cli(["s3", "cp", f"s3://{bucket}/{key}", "-"]))
+        return [
+            e["RelativePath"].lstrip("/")
+            for e in report.get("Transferred", [])
+            if e.get("TransferStatus", "").upper() == "SUCCESS" and e.get("RelativePath")
+        ]
+
     all_files = []
-    for line in ls_output.splitlines():
-        parts = line.split(maxsplit=3)
-        if len(parts) == 4 and "files-transferred" in parts[3] and parts[3].endswith(".json"):
-            key = f"{detailed_prefix}/{parts[3].strip()}"
-            report = json.loads(cli(["s3", "cp", f"s3://{bucket}/{key}", "-"]))
-            all_files += [
-                e["RelativePath"].lstrip("/")
-                for e in report.get("Transferred", [])
-                if e.get("TransferStatus", "").upper() == "SUCCESS" and e.get("RelativePath")
-            ]
+    with ThreadPoolExecutor(max_workers=min(len(report_keys), 8) or 1) as ex:
+        for files in ex.map(read_report, report_keys):
+            all_files.extend(files)
     return all_files
+
+
+def process_execution(bucket, summary_key, location_uris):
+    """Returns (output_lines, files) so prints don't interleave across threads."""
+    summary = json.loads(cli(["s3", "cp", f"s3://{bucket}/{summary_key}", "-"]))
+    exec_id  = summary.get("TaskExecutionId", "")
+    result   = summary.get("Result", {})
+    count    = result.get("FilesTransferred", 0)
+    skipped  = result.get("FilesSkipped", 0)
+    status   = summary.get("OverallStatus", "")
+
+    src_id   = summary.get("SourceLocation", {}).get("LocationId", "")
+    dst_id   = summary.get("DestinationLocation", {}).get("LocationId", "")
+    src_type = summary.get("SourceLocation", {}).get("LocationType", "")
+    dst_type = summary.get("DestinationLocation", {}).get("LocationType", "")
+    src_uri  = location_uris.get(src_id, src_id)
+    dst_uri  = location_uris.get(dst_id, dst_id)
+
+    lines = [
+        f"\n  {exec_id}  [{status}]",
+        f"    Source      : {src_uri}  ({src_type})",
+        f"    Source path : {uri_path(src_uri)}",
+        f"    Destination : {dst_uri}  ({dst_type})",
+        f"    Dest path   : {uri_path(dst_uri)}",
+        f"    Transferred : {count} file(s)  |  Skipped: {skipped}",
+    ]
+
+    files = fetch_files_from_detailed(bucket, summary_key) if count > 0 else []
+    return lines, files
 
 
 def main():
@@ -121,9 +152,19 @@ def main():
         sys.exit("No summary reports found.")
     print(f"Executions found: {len(summary_keys)}")
 
+    # Process all executions in parallel, preserving print order
     all_files = []
-    for key in summary_keys:
-        all_files.extend(process_execution(bucket, key, location_uris))
+    results = [None] * len(summary_keys)
+    with ThreadPoolExecutor(max_workers=min(len(summary_keys), 8)) as ex:
+        futures = {ex.submit(process_execution, bucket, key, location_uris): i
+                   for i, key in enumerate(summary_keys)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+
+    for lines, files in results:
+        for line in lines:
+            print(line)
+        all_files.extend(files)
 
     print(f"\nTotal successfully transferred: {len(all_files)} file(s)\n")
 
