@@ -1,8 +1,8 @@
 """
 List files successfully transferred in a DataSync task report.
 
-Auto-discovers the correct S3 bucket by looking for a Summary-Reports folder
-structure — no bucket name or naming convention needed.
+Auto-discovers the correct S3 bucket by looking for a Summary-Reports folder.
+Shows FSx source/destination context per execution, plus total file count.
 
 Uses the currently active AWS CLI profile — no config needed.
 
@@ -24,34 +24,38 @@ def cli(args):
 
 
 def s3_ls(uri):
-    """Run aws s3 ls and return output lines. Returns [] on any error."""
     r = subprocess.run(["aws", "s3", "ls", uri], capture_output=True, text=True)
     return r.stdout.splitlines() if r.returncode == 0 else []
 
 
 def find_report_bucket():
-    """
-    Scan all buckets for one containing a Summary-Reports folder.
-    Uses aws s3 ls (same as the rest of the script). Checks root and one
-    level deep (e.g. reports/Summary-Reports/).
-    Returns (bucket, base_prefix).
-    """
     buckets = json.loads(cli(["s3api", "list-buckets"]))["Buckets"]
     for b in buckets:
         bucket = b["Name"]
         top_lines = s3_ls(f"s3://{bucket}/")
-        # Collect root + any top-level folders as candidate prefixes
         top_prefixes = [""] + [
             line.split()[-1]
             for line in top_lines
             if line.split() and line.split()[-1].endswith("/")
         ]
         for prefix in top_prefixes:
-            sub_lines = s3_ls(f"s3://{bucket}/{prefix}")
-            if any("Summary-Reports/" in line for line in sub_lines):
+            if any("Summary-Reports/" in l for l in s3_ls(f"s3://{bucket}/{prefix}")):
                 return bucket, prefix
-
     sys.exit("No bucket with a DataSync Summary-Reports structure found.")
+
+
+def load_location_uris():
+    """
+    Fetch all DataSync locations and return a dict of {location-id: uri}.
+    Used to resolve human-readable FSx paths from the summary LocationId.
+    """
+    r = subprocess.run(["aws", "datasync", "list-locations"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return {}
+    return {
+        loc["LocationArn"].split("/")[-1]: loc["LocationUri"]
+        for loc in json.loads(r.stdout).get("Locations", [])
+    }
 
 
 def find_summary_keys(bucket, base_prefix):
@@ -63,15 +67,30 @@ def find_summary_keys(bucket, base_prefix):
     ]
 
 
-def get_transferred_files(bucket, summary_key):
+def process_execution(bucket, summary_key, location_uris):
     summary = json.loads(cli(["s3", "cp", f"s3://{bucket}/{summary_key}", "-"]))
-    exec_id = summary.get("TaskExecutionId", "")
-    count = summary.get("Result", {}).get("FilesTransferred", 0)
-    print(f"  {exec_id}  →  FilesTransferred: {count}", file=sys.stderr)
+    exec_id   = summary.get("TaskExecutionId", "")
+    result    = summary.get("Result", {})
+    count     = result.get("FilesTransferred", 0)
+    skipped   = result.get("FilesSkipped", 0)
+    status    = summary.get("OverallStatus", "")
+
+    src_id    = summary.get("SourceLocation", {}).get("LocationId", "")
+    dst_id    = summary.get("DestinationLocation", {}).get("LocationId", "")
+    src_type  = summary.get("SourceLocation", {}).get("LocationType", "")
+    dst_type  = summary.get("DestinationLocation", {}).get("LocationType", "")
+    src_uri   = location_uris.get(src_id, src_id)
+    dst_uri   = location_uris.get(dst_id, dst_id)
+
+    print(f"\n  {exec_id}  [{status}]")
+    print(f"    Source      : {src_uri}  ({src_type})")
+    print(f"    Destination : {dst_uri}  ({dst_type})")
+    print(f"    Transferred : {count} file(s)  |  Skipped: {skipped}")
+
     if count == 0:
         return []
 
-    # Swap Summary-Reports for Detailed-Reports in the key path
+    # Fetch per-file list from Detailed-Reports
     detailed_prefix = summary_key.replace("Summary-Reports", "Detailed-Reports").rsplit("/", 1)[0]
     ls_output = cli(["s3", "ls", f"s3://{bucket}/{detailed_prefix}/"])
 
@@ -89,77 +108,22 @@ def get_transferred_files(bucket, summary_key):
     return all_files
 
 
-def resolve_bucket(name):
-    """
-    Given a bucket name, find the base prefix that contains Summary-Reports/.
-    Returns (bucket, base_prefix) or prints a warning and returns (None, None).
-    """
-    top_lines = s3_ls(f"s3://{name}/")
-    if not top_lines and not s3_ls(f"s3://{name}/"):
-        print(f"  [!] Cannot access s3://{name}/ — check the name and permissions.")
-        return None, None
-
-    top_prefixes = [""] + [
-        line.split()[-1]
-        for line in top_lines
-        if line.split() and line.split()[-1].endswith("/")
-    ]
-    for prefix in top_prefixes:
-        sub_lines = s3_ls(f"s3://{name}/{prefix}")
-        if any("Summary-Reports/" in line for line in sub_lines):
-            return name, prefix
-
-    print(f"  [!] No Summary-Reports/ folder found in s3://{name}/")
-    return None, None
-
-
-def prompt_buckets():
-    """
-    Interactive prompt: auto-discover a bucket, then let the user add more
-    or override with a manual name.
-    Returns a list of (bucket, base_prefix) tuples.
-    """
-    print("\nAuto-discovering DataSync report bucket...", flush=True)
-    discovered_bucket, discovered_prefix = find_report_bucket()
-    print(f"  Found: {discovered_bucket}  (prefix: '{discovered_prefix or 'root'}')")
-
-    use = input("\nUse this bucket? [Y/n]: ").strip().lower()
-    buckets = []
-    if use != "n":
-        buckets.append((discovered_bucket, discovered_prefix))
-
-    while True:
-        add = input("Add another bucket? [y/N]: ").strip().lower()
-        if add != "y":
-            break
-        name = input("  Bucket name: ").strip()
-        if not name:
-            continue
-        bucket, prefix = resolve_bucket(name)
-        if bucket:
-            print(f"  OK — prefix: '{prefix or 'root'}'")
-            buckets.append((bucket, prefix))
-
-    if not buckets:
-        sys.exit("No buckets selected. Exiting.")
-    return buckets
-
-
 def main():
     output_json = "--output" in sys.argv and sys.argv[sys.argv.index("--output") + 1] == "json"
 
-    selected = prompt_buckets()
+    bucket, base_prefix = find_report_bucket()
+    print(f"\nBucket : {bucket}")
+
+    location_uris = load_location_uris()
+
+    summary_keys = find_summary_keys(bucket, base_prefix)
+    if not summary_keys:
+        sys.exit("No summary reports found.")
+    print(f"Executions found: {len(summary_keys)}")
 
     all_files = []
-    for bucket, base_prefix in selected:
-        print(f"\nBucket : {bucket}", flush=True)
-        summary_keys = find_summary_keys(bucket, base_prefix)
-        if not summary_keys:
-            print("  No summary reports found.")
-            continue
-        print(f"  Found {len(summary_keys)} execution(s):")
-        for key in summary_keys:
-            all_files.extend(get_transferred_files(bucket, key))
+    for key in summary_keys:
+        all_files.extend(process_execution(bucket, key, location_uris))
 
     print(f"\nTotal successfully transferred: {len(all_files)} file(s)\n")
 
