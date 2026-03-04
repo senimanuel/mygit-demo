@@ -1,1 +1,21 @@
-{"TaskExecutionId":"exec-0038c5412f99fc7aa","Verified":[{"RelativePath":"/landing-zone/UMB.U81295.Snowball.rng0.zip","SrcMetadata":{"Type":"Regular","ContentSize":343762577,"Mtime":"2026-02-26T13:56:31.000000000Z"},"SrcChecksum":"SHA256:319e73bfe3c30e97122aae7daa9f1aad576b6bf4bfccbc4d1c74cf53c841b581","DstMetadata":{"Type":"Regular","ContentSize":343762577,"Mtime":"2026-02-26T14:21:25.889957000Z","Atime":"2026-03-03T12:43:42.441955000Z","Uid":65535,"Gid":65535,"Mode":"0644"},"DstChecksum":"SHA256:319e73bfe3c30e97122aae7daa9f1aad576b6bf4bfccbc4d1c74cf53c841b581","VerifyTimestamp":"2026-03-03T12:43:44.653767330Z","VerifyStatus":"SUCCESS"},{"RelativePath":"/landing-zone/UMB.U81295.Snowball.rng1.zip","SrcMetadata":{"Type":"Regular","ContentSize":342810852,"Mtime":"2026-02-26T13:56:30.000000000Z"},"SrcChecksum":"SHA256:88b9aa819a4162428bbbcf8b3218be6f9dce3cf000097e0833ebaaf7adf1045e","DstMetadata":{"Type":"Regular","ContentSize":342810852,"Mtime":"2026-02-26T14:21:27.619711000Z","Atime":"2026-03-03T12:43:42.802096000Z","Uid":65535,"Gid":65535,"Mode":"0644"},"DstChecksum":"SHA256:88b9aa819a4162428bbbcf8b3218be6f9dce3cf000097e0833ebaaf7adf1045e","VerifyTimestamp":"2026-03-03T12:43:44.653896079Z","VerifyStatus":"SUCCESS"},{"RelativePath":"/landing-zone/UMB.U81295.Snowball.rng2.zip","SrcMetadata":{"Type":"Regular","ContentSize":344509500,"Mtime":"2026-02-26T13:56:31.000000000Z"},"SrcChecksum":"SHA256:13e0c93276223ebce56be3e8b85e855dd799dd1dfc7c52cf5523d0fc53c1867e","DstMetadata":{"Type":"Regular","ContentSize":344509500,"Mtime":"2026-02-26T14:21:26.559907000Z","Atime":"2026-03-03T12:43:42.072166000Z","Uid":65535,"Gid":65535,"Mode":"0644"},"DstChecksum":"SHA256:13e0c93276223ebce56be3e8b85e855dd799dd1dfc7c52cf5523d0fc53c1867e","VerifyTimestamp":"2026-03-03T12:43:44.653937174Z","VerifyStatus":"SUCCESS"}]}
+"""
+Read a DataSync task report JSON and list successfully transferred files.
+
+Usage:
+  python list_transferred_files.py exec.json
+"""
+
+import json
+import sys
+
+report = json.loads(open(sys.argv[1]).read())
+
+files = [
+    e["RelativePath"]
+    for e in report.get("Verified", [])
+    if e.get("VerifyStatus") == "SUCCESS"
+]
+
+print(f"\nSuccessfully transferred: {len(files)} file(s)\n")
+for f in files:
+    print(f)
