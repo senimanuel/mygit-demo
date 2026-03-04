@@ -8,6 +8,9 @@ Usage:
 import json
 import sys
 
+if len(sys.argv) < 2:
+    sys.exit("Usage: python list_transferred_files.py <path/to/report.json>")
+
 report = json.loads(open(sys.argv[1]).read())
 
 files = [
@@ -16,6 +19,8 @@ files = [
     if e.get("VerifyStatus") == "SUCCESS"
 ]
 
-print(f"\nSuccessfully transferred: {len(files)} file(s)\n")
+exec_id = report.get("TaskExecutionId", "unknown")
+print(f"\nTask Execution : {exec_id}")
+print(f"Successfully transferred: {len(files)} file(s)\n")
 for f in files:
     print(f)
