@@ -55,15 +55,19 @@ def find_report_bucket():
     sys.exit("No bucket with a DataSync Summary-Reports structure found.")
 
 
-def load_location_uris():
+def load_location_uris(region):
     """Pre-load all DataSync location URIs into a {location-id: uri} dict."""
     step("Loading DataSync locations...")
-    r = subprocess.run(["aws", "datasync", "list-locations"], capture_output=True, text=True)
+    r = subprocess.run(["aws", "datasync", "list-locations", "--region", region],
+                       capture_output=True, text=True)
     if r.returncode != 0:
+        step(f"Warning: list-locations failed: {r.stderr.strip()}")
         return {}
+    locations = json.loads(r.stdout).get("Locations", [])
+    step(f"Found {len(locations)} DataSync location(s) in {region}")
     return {
         loc["LocationArn"].split("/")[-1]: loc["LocationUri"]
-        for loc in json.loads(r.stdout).get("Locations", [])
+        for loc in locations
     }
 
 
@@ -92,12 +96,16 @@ def resolve_location_uri(location_id, location_type, account_id, region, cache):
     cmd = _DESCRIBE_CMD.get(location_type)
     if cmd:
         arn = f"arn:aws:datasync:{region}:{account_id}:location/{location_id}"
-        r = subprocess.run(["aws", "datasync", cmd, "--location-arn", arn],
+        r = subprocess.run(["aws", "datasync", cmd, "--location-arn", arn, "--region", region],
                            capture_output=True, text=True)
         if r.returncode == 0:
             uri = json.loads(r.stdout).get("LocationUri", location_id)
             cache[location_id] = uri
             return uri
+        else:
+            step(f"Warning: {cmd} failed for {location_id}: {r.stderr.strip()}")
+    else:
+        step(f"Warning: Unknown location type '{location_type}' — cannot resolve {location_id}")
 
     return location_id  # fallback: raw ID if describe fails
 
@@ -196,7 +204,7 @@ def main():
     print("\n[2/4] Loading DataSync location names...")
     region = subprocess.run(["aws", "configure", "get", "region"],
                             capture_output=True, text=True).stdout.strip() or "us-east-1"
-    location_uris = load_location_uris()
+    location_uris = load_location_uris(region)
 
     print("\n[3/4] Finding execution reports...")
     summary_keys = find_summary_keys(bucket, base_prefix)
