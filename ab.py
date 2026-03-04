@@ -46,10 +46,7 @@ def find_report_bucket():
 
 
 def load_location_uris():
-    """
-    Fetch all DataSync locations and return a dict of {location-id: uri}.
-    Used to resolve human-readable FSx paths from the summary LocationId.
-    """
+    """Pre-load all DataSync location URIs into a {location-id: uri} dict."""
     r = subprocess.run(["aws", "datasync", "list-locations"], capture_output=True, text=True)
     if r.returncode != 0:
         return {}
@@ -57,6 +54,43 @@ def load_location_uris():
         loc["LocationArn"].split("/")[-1]: loc["LocationUri"]
         for loc in json.loads(r.stdout).get("Locations", [])
     }
+
+
+# Maps LocationType (from summary) to the correct describe CLI subcommand
+_DESCRIBE_CMD = {
+    "Amazon S3":                             "describe-location-s3",
+    "Amazon NFS":                            "describe-location-nfs",
+    "Amazon EFS":                            "describe-location-efs",
+    "Amazon SMB":                            "describe-location-smb",
+    "Amazon FSx for Windows File Server":    "describe-location-fsx-windows",
+    "Amazon FSx for Lustre":                 "describe-location-fsx-lustre",
+    "Amazon FSx for OpenZFS":                "describe-location-fsx-open-zfs",
+    "Amazon FSx for NetApp ONTAP (NFS)":     "describe-location-fsx-ontap",
+    "Amazon FSx for NetApp ONTAP (SMB)":     "describe-location-fsx-ontap",
+}
+
+
+def resolve_location_uri(location_id, location_type, account_id, region, cache):
+    """
+    Return the URI for a DataSync location.
+    Tries the pre-loaded cache first; falls back to a direct describe call
+    so we always get the human-readable path (e.g. /CBlueDev/) even when
+    list-locations is paginated or the cache is empty.
+    """
+    if location_id in cache:
+        return cache[location_id]
+
+    cmd = _DESCRIBE_CMD.get(location_type)
+    if cmd:
+        arn = f"arn:aws:datasync:{region}:{account_id}:location/{location_id}"
+        r = subprocess.run(["aws", "datasync", cmd, "--location-arn", arn],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            uri = json.loads(r.stdout).get("LocationUri", location_id)
+            cache[location_id] = uri   # save for next time
+            return uri
+
+    return location_id   # last resort: return the raw ID
 
 
 def find_summary_keys(bucket, base_prefix):
@@ -110,21 +144,22 @@ def fetch_files_from_detailed(bucket, summary_key):
     return all_files
 
 
-def process_execution(bucket, summary_key, location_uris):
+def process_execution(bucket, summary_key, location_uris, region):
     """Returns (output_lines, files) so prints don't interleave across threads."""
-    summary = json.loads(cli(["s3", "cp", f"s3://{bucket}/{summary_key}", "-"]))
+    summary  = json.loads(cli(["s3", "cp", f"s3://{bucket}/{summary_key}", "-"]))
     exec_id  = summary.get("TaskExecutionId", "")
     result   = summary.get("Result", {})
     count    = result.get("FilesTransferred", 0)
     skipped  = result.get("FilesSkipped", 0)
     status   = summary.get("OverallStatus", "")
+    account_id = summary.get("AccountId", "")
 
     src_id   = summary.get("SourceLocation", {}).get("LocationId", "")
     dst_id   = summary.get("DestinationLocation", {}).get("LocationId", "")
     src_type = summary.get("SourceLocation", {}).get("LocationType", "")
     dst_type = summary.get("DestinationLocation", {}).get("LocationType", "")
-    src_uri  = location_uris.get(src_id, src_id)
-    dst_uri  = location_uris.get(dst_id, dst_id)
+    src_uri  = resolve_location_uri(src_id, src_type, account_id, region, location_uris)
+    dst_uri  = resolve_location_uri(dst_id, dst_type, account_id, region, location_uris)
 
     lines = [
         f"\n  {exec_id}  [{status}]",
@@ -145,7 +180,9 @@ def main():
     bucket, base_prefix = find_report_bucket()
     print(f"\nBucket : {bucket}")
 
-    location_uris = load_location_uris()
+    region = subprocess.run(["aws", "configure", "get", "region"],
+                            capture_output=True, text=True).stdout.strip() or "us-east-1"
+    location_uris = load_location_uris()   # shared cache, also updated by resolve_location_uri
 
     summary_keys = find_summary_keys(bucket, base_prefix)
     if not summary_keys:
@@ -156,7 +193,7 @@ def main():
     all_files = []
     results = [None] * len(summary_keys)
     with ThreadPoolExecutor(max_workers=min(len(summary_keys), 8)) as ex:
-        futures = {ex.submit(process_execution, bucket, key, location_uris): i
+        futures = {ex.submit(process_execution, bucket, key, location_uris, region): i
                    for i, key in enumerate(summary_keys)}
         for future in as_completed(futures):
             results[futures[future]] = future.result()
