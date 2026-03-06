@@ -1,71 +1,8 @@
 {
-  "AccountId": "087770004825",
-  "TaskExecutionId": "exec-05dfc51ae3f8dc2f3",
-  "SourceLocation": {
-    "LocationType": "Amazon S3",
-    "LocationId": "loc-0a735edffdcce1d99",
-    "CreationTime": "2026-02-25T14:08:26.283000000Z"
-  },
-  "DestinationLocation": {
-    "LocationType": "Amazon FSx for NetApp ONTAP (NFS)",
-    "LocationId": "loc-024ec9dcda10b8804",
-    "CreationTime": "2026-03-02T13:33:34.169000000Z"
-  },
-  "StartTime": "2026-03-06T17:12:00.887000000Z",
-  "EndTime": "2026-03-06T17:12:04.421000000Z",
-  "TotalTime": 3534,
-  "OverallStatus": "SUCCESS",
-  "Result": {
-    "FilesTransferred": 0,
-    "FilesDeleted": 0,
-    "FilesVerified": 0,
-    "FilesSkipped": 1,
-    "BytesWritten": 0,
-    "BytesTransferred": 0,
-    "BytesCompressed": 0,
-    "PrepareDuration": 1358,
-    "PrepareStatus": "SUCCESS",
-    "TransferDuration": 1808,
-    "TransferStatus": "SUCCESS",
-    "VerifyDuration": 328,
-    "VerifyStatus": "SUCCESS"
-  },
-  "Options": {
-    "VerifyMode": "ONLY_FILES_TRANSFERRED",
-    "OverwriteMode": "ALWAYS",
-    "Atime": "NONE",
-    "Mtime": "NONE",
-    "Uid": "NONE",
-    "Gid": "NONE",
-    "PreserveDeletedFiles": "PRESERVE",
-    "PreserveDevices": "NONE",
-    "PosixPermissions": "NONE",
-    "BytesPerSecond": -1,
-    "TaskQueueing": "ENABLED",
-    "LogLevel": "BASIC",
-    "TransferMode": "CHANGED",
-    "SecurityDescriptorCopyFlags": "NONE",
-    "ObjectTags": "PRESERVE"
-  },
-  "Filters": {
-    "Includes": [
-      {
-        "FilterType": "SIMPLE_PATTERN",
-        "Value": "/test/*"
-      }
-    ],
-    "Excludes": []
-  },
-  "TaskReportConfig": {
-    "Destination": {
-      "S3": {
-        "Subdirectory": "reports/",
-        "S3BucketArn": "arn:aws:s3:::eec-aws-us-ms-c9migration-sandbox-fsx-test-datasync",
-        "BucketAccessRoleArn": "arn:aws:iam::087770004825:role/fsx-import-test-datasync-role"
-      }
-    },
-    "OutputType": "STANDARD",
-    "ReportLevel": "SUCCESSES_AND_ERRORS",
-    "ObjectVersionIds": "NONE"
+  "source": "aws.datasync",
+  "detail-type": "DataSync Task Execution State Change",
+  "detail": {
+    "State": "SUCCESS",
+    "TaskExecutionArn": "arn:aws:datasync:us-west-2:087770004825:task/REPLACE-WITH-TASK-ID/execution/exec-05dfc51ae3f8dc2f3"
   }
 }
