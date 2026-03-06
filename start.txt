@@ -1,8 +1,178 @@
-{
-  "source": "aws.datasync",
-  "detail-type": "DataSync Task Execution State Change",
-  "detail": {
-    "State": "SUCCESS",
-    "TaskExecutionArn": "arn:aws:datasync:us-west-2:087770004825:task/REPLACE-WITH-TASK-ID/execution/exec-05dfc51ae3f8dc2f3"
-  }
-}
+"""
+DataSync Event Archiver — Lambda Handler
+
+Triggered by EventBridge whenever a DataSync task execution reaches a terminal
+state.  Only SUCCESS executions are processed.
+
+Flow:
+  1. Extract TaskExecutionArn from the EventBridge event.
+  2. Locate the matching summary-v1.json under REPORT_BUCKET/REPORT_PREFIX/Summary-Reports/.
+  3. Read each files-transferred-*.json from the matching Detailed-Reports path.
+  4. Write the consolidated file list to ARCHIVE_BUCKET/ARCHIVE_PREFIX/<task>/<exec>/.
+  5. S3 lifecycle (managed by Terraform) expires the archive after 7 days.
+
+Required environment variables
+  REPORT_BUCKET     S3 bucket where DataSync writes task reports
+  REPORT_PREFIX     S3 key prefix before "Summary-Reports/" (can be empty)
+  ARCHIVE_BUCKET    S3 bucket for archived results (defaults to REPORT_BUCKET)
+  ARCHIVE_PREFIX    S3 key prefix for archive output (default: datasync-archive)
+  ALLOWED_TASK_ARNS Comma-separated list of DataSync task ARNs to process.
+                    If empty, all SUCCESS executions are processed.
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+
+import boto3
+
+
+def lambda_handler(event, context):
+    # Log the raw event first so every invocation is visible in CloudWatch
+    # regardless of event shape — critical for diagnosing EventBridge routing.
+    print(json.dumps({"received_event": event}))
+
+    detail = event.get("detail", {})
+    state = detail.get("State", "")
+
+    # The real DataSync EventBridge event puts the execution ARN in resources[0],
+    # not in detail.TaskExecutionArn (which is absent in practice).
+    # Fall back to detail.TaskExecutionArn for manual/console test invocations.
+    resources = event.get("resources", [])
+    task_exec_arn = (
+        resources[0]
+        if resources
+        else detail.get("TaskExecutionArn", "")
+    )
+
+    if state != "SUCCESS":
+        print(f"Skipping execution — state={state!r}, arn={task_exec_arn!r}")
+        return {"status": "skipped", "reason": f"state={state}"}
+
+    # Task-level filter: only process executions belonging to allowed tasks.
+    # Replicated from the old EventBridge prefix filter but now visible in logs.
+    allowed_arns = [
+        a.strip()
+        for a in os.environ.get("ALLOWED_TASK_ARNS", "").split(",")
+        if a.strip()
+    ]
+    if allowed_arns and not any(task_exec_arn.startswith(a) for a in allowed_arns):
+        print(f"Skipping: task not in ALLOWED_TASK_ARNS — {task_exec_arn!r}")
+        return {"status": "skipped", "reason": "task_not_allowed"}
+
+    # Parse task_id and exec_id from the execution ARN.
+    # Format: arn:aws:datasync:region:account:task/task-xxx/execution/exec-yyy
+    try:
+        # Split on "/" and take positional segments after the ARN prefix
+        slash_parts = task_exec_arn.split("/")
+        task_id = slash_parts[1]   # task-xxx
+        exec_id = slash_parts[3]   # exec-yyy
+        if not task_id.startswith("task-") or not exec_id.startswith("exec-"):
+            raise ValueError("Unexpected segment values")
+    except (IndexError, ValueError) as exc:
+        raise ValueError(f"Cannot parse TaskExecutionArn {task_exec_arn!r}: {exc}") from exc
+
+    report_bucket = os.environ["REPORT_BUCKET"]
+    report_prefix = os.environ.get("REPORT_PREFIX", "").strip("/")
+    archive_bucket = os.environ.get("ARCHIVE_BUCKET", report_bucket)
+    archive_prefix = os.environ.get("ARCHIVE_PREFIX", "datasync-archive").strip("/")
+
+    s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+
+    # ------------------------------------------------------------------
+    # 1. Find the summary report for this specific execution
+    # ------------------------------------------------------------------
+    summary_root = f"{report_prefix}/Summary-Reports/" if report_prefix else "Summary-Reports/"
+    summary_key = _find_key(s3, paginator, report_bucket, summary_root, exec_id, "summary-v1.json")
+
+    if not summary_key:
+        msg = (
+            f"No summary report found for execution {exec_id} "
+            f"under s3://{report_bucket}/{summary_root}"
+        )
+        print(msg)
+        return {"status": "not_found", "message": msg}
+
+    print(f"Reading summary: s3://{report_bucket}/{summary_key}")
+    summary = _get_json(s3, report_bucket, summary_key)
+
+    result = summary.get("Result", {})
+    count = result.get("FilesTransferred", 0)
+    src_location = summary.get("SourceLocation", {})
+    dst_location = summary.get("DestinationLocation", {})
+
+    # ------------------------------------------------------------------
+    # 2. Read detailed transferred-files reports
+    # ------------------------------------------------------------------
+    files = []
+    if count > 0:
+        detail_prefix = (
+            summary_key
+            .replace("Summary-Reports", "Detailed-Reports")
+            .rsplit("/", 1)[0]
+        )
+        for page in paginator.paginate(Bucket=report_bucket, Prefix=f"{detail_prefix}/"):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if "files-transferred" in key and key.endswith(".json"):
+                    report_data = _get_json(s3, report_bucket, key)
+                    for entry in report_data.get("Transferred", []):
+                        if (
+                            entry.get("TransferStatus", "").upper() == "SUCCESS"
+                            and entry.get("RelativePath")
+                        ):
+                            files.append(entry["RelativePath"].lstrip("/"))
+
+    # ------------------------------------------------------------------
+    # 3. Archive the consolidated file list
+    #    S3 lifecycle expires this prefix after 7 days.
+    # ------------------------------------------------------------------
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive_key = f"{archive_prefix}/{task_id}/{exec_id}/{timestamp}-transferred.json"
+
+    payload = {
+        "TaskExecutionArn": task_exec_arn,
+        "TaskId": task_id,
+        "ExecutionId": exec_id,
+        "CompletedAt": timestamp,
+        "FilesTransferred": count,
+        "SourceLocation": src_location,
+        "DestinationLocation": dst_location,
+        "Files": files,
+    }
+
+    s3.put_object(
+        Bucket=archive_bucket,
+        Key=archive_key,
+        Body=json.dumps(payload, indent=2),
+        ContentType="application/json",
+    )
+
+    print(f"Archived {len(files)} file(s) → s3://{archive_bucket}/{archive_key}")
+    return {
+        "status": "success",
+        "task_id": task_id,
+        "exec_id": exec_id,
+        "files_transferred": len(files),
+        "archive_key": archive_key,
+    }
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _find_key(s3, paginator, bucket, prefix, exec_id, suffix):
+    """Return the first S3 key under prefix that contains exec_id and ends with suffix."""
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if exec_id in key and key.endswith(suffix):
+                return key
+    return None
+
+
+def _get_json(s3, bucket, key):
+    response = s3.get_object(Bucket=bucket, Key=key)
+    return json.loads(response["Body"].read())
