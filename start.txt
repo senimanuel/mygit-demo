@@ -1,10 +1,13 @@
-# 1. Check what ALLOWED_TASK_ARNS is actually set to in the Lambda
-aws lambda get-function-configuration \
+workstation aws-datasync-s3-fsx-test % aws lambda get-function-configuration \
   --function-name c9migration-sbx-datasync-archiver \
   --region us-west-2 \
   --query 'Environment.Variables.ALLOWED_TASK_ARNS'
-
-# 2. Check the actual task ARN from DataSync
-aws datasync list-tasks \
+"arn:aws:datasync:us-west-2:087770004825:task/task-01f0b0156357edd7e"
+workstation aws-datasync-s3-fsx-test % aws datasync list-tasks \
   --region us-west-2 \
   --query 'Tasks[].TaskArn'
+[
+    "arn:aws:datasync:us-west-2:087770004825:task/task-0c12da4511e7fd8c1",
+    "arn:aws:datasync:us-west-2:087770004825:task/task-0e8d54052c334c007"
+]
+workstation aws-datasync-s3-fsx-test % 
