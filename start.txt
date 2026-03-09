@@ -1,3 +1,10 @@
-echo "test $(date)" | aws s3 cp - \
-  "s3://eec-aws-us-ms-c9migration-sandbox-fsx-test-datasync/test/testfile-$(date +%s).txt" \
-  --region us-west-2
+# 1. Check what ALLOWED_TASK_ARNS is actually set to in the Lambda
+aws lambda get-function-configuration \
+  --function-name c9migration-sbx-datasync-archiver \
+  --region us-west-2 \
+  --query 'Environment.Variables.ALLOWED_TASK_ARNS'
+
+# 2. Check the actual task ARN from DataSync
+aws datasync list-tasks \
+  --region us-west-2 \
+  --query 'Tasks[].TaskArn'
