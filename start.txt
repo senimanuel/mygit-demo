@@ -1,13 +1,37 @@
-workstation aws-datasync-s3-fsx-test % aws lambda get-function-configuration \
-  --function-name c9migration-sbx-datasync-archiver \
-  --region us-west-2 \
-  --query 'Environment.Variables.ALLOWED_TASK_ARNS'
-"arn:aws:datasync:us-west-2:087770004825:task/task-01f0b0156357edd7e"
-workstation aws-datasync-s3-fsx-test % aws datasync list-tasks \
-  --region us-west-2 \
-  --query 'Tasks[].TaskArn'
-[
-    "arn:aws:datasync:us-west-2:087770004825:task/task-0c12da4511e7fd8c1",
-    "arn:aws:datasync:us-west-2:087770004825:task/task-0e8d54052c334c007"
-]
-workstation aws-datasync-s3-fsx-test % 
+[ERROR] TypeError: 'dict' object is not callable
+Traceback (most recent call last):
+  File "/var/task/handler.py", line 10, in lambda_handler
+    return process_datasync_event(event)
+  File "/var/task/handler.py", line 55, in process_datasync_event
+    print(f"task_id={task_id!r} source_prefix={source_prefix!r} map_keys={list(task_prefix_map())}")
+
+
+
+{
+  "TaskExecutionId": "exec-0794e2363f9cb3a6b",
+  "Transferred": [
+    {
+      "RelativePath": "/testfilesA-1773153484.txt",
+      "SrcMetadata": {
+        "Type": "Regular",
+        "ContentSize": 34,
+        "Mtime": "2026-03-10T14:38:06.000000000Z"
+      },
+      "Overwrite": "False",
+      "TransferTimestamp": "2026-03-10T15:09:08.090079274Z",
+      "TransferType": "CONTENT_AND_METADATA",
+      "TransferStatus": "SUCCESS"
+    },
+    {
+      "RelativePath": "/",
+      "SrcMetadata": {
+        "Type": "Directory",
+        "Mtime": "1970-01-01T00:00:00.000000000Z"
+      },
+      "Overwrite": "False",
+      "TransferTimestamp": "2026-03-10T15:09:08.393294804Z",
+      "TransferType": "CONTENT_AND_METADATA",
+      "TransferStatus": "SUCCESS"
+    }
+  ]
+}
